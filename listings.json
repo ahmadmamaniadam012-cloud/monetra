@@ -1,0 +1,67 @@
+{
+ "settings": {
+  "ownerWhatsApp": "",
+  "fees": "Listing is free. Send your item and we post it for you.",
+  "adTitle": "",
+  "adText": "",
+  "adPhone": ""
+ },
+ "listings": [
+  {
+   "id": "s1",
+   "title": "iPhone 11, 128GB, clean",
+   "price": 280000,
+   "cat": "Phones & Gadgets",
+   "area": "Sabon Gari",
+   "seller": "Sample seller",
+   "phone": "",
+   "desc": "Face ID works. Comes with charger.",
+   "photo": "",
+   "featured": true,
+   "sold": false,
+   "sample": true
+  },
+  {
+   "id": "s2",
+   "title": "Ankara fabric, 6 yards",
+   "price": 12000,
+   "cat": "Fashion",
+   "area": "Barade",
+   "seller": "Sample seller",
+   "phone": "",
+   "desc": "Three designs available.",
+   "photo": "",
+   "featured": false,
+   "sold": false,
+   "sample": true
+  },
+  {
+   "id": "s3",
+   "title": "Groundnut oil, 5 litres",
+   "price": 14000,
+   "cat": "Food",
+   "area": "Magami",
+   "seller": "Sample seller",
+   "phone": "",
+   "desc": "Pure, freshly pressed.",
+   "photo": "",
+   "featured": false,
+   "sold": false,
+   "sample": true
+  },
+  {
+   "id": "s4",
+   "title": "Phone screen repair",
+   "price": 5000,
+   "cat": "Services",
+   "area": "Mayo Gwoi",
+   "seller": "Sample seller",
+   "phone": "",
+   "desc": "Price starts from. Same-day fix.",
+   "photo": "",
+   "featured": false,
+   "sold": false,
+   "sample": true
+  }
+ ]
+}
