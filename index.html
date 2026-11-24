@@ -118,19 +118,25 @@ footer{margin-top:22px;color:var(--muted);font-size:.8rem;display:flex;justify-c
 .pill.ok{background:var(--brand);color:var(--brand-ink)}
 .pill.bad{background:var(--danger);color:#fff}
 .back{margin:12px 0}
+
+.msgs{display:flex;flex-direction:column;gap:6px;max-height:55vh;min-height:120px;overflow-y:auto;padding:8px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.b{max-width:82%;padding:8px 11px;border-radius:12px;background:var(--surface);border:1px solid var(--line);overflow-wrap:anywhere;white-space:pre-wrap;align-self:flex-start}
+.b.me{align-self:flex-end;background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+.sendrow{display:flex;gap:8px;margin-top:10px}
+.sendrow input{flex:1;min-width:0;padding:11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 </style></head><body>
 <div id="app"></div>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import {getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,query,where,onSnapshot,serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,updateProfile} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,query,where,onSnapshot,serverTimestamp,addDoc,orderBy} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {CONFIG} from "./config.js";
 
 var CATS=['Phones & Gadgets','Fashion & Tailoring','Food','Home & Repairs','Beauty','Tutoring','Transport & Delivery','Other'];
 var AREAS=['Sabon Gari','Barade','Magami','Mayo Gwoi'];
 var app=document.getElementById('app');
 var configured=CONFIG&&CONFIG.firebase&&CONFIG.firebase.apiKey&&CONFIG.firebase.apiKey.indexOf('PASTE')<0;
-var S={view:'home',user:null,approved:[],all:[],settings:{commission:7,whatsapp:'',adTitle:'',adText:'',adPhone:''},q:'',cat:'All',tab:'in',err:'',busy:false,photo:'',toast:''};
+var S={view:'home',user:null,chats:[],msgs:[],chatId:null,chatMeta:null,approved:[],all:[],settings:{commission:7,whatsapp:'',adTitle:'',adText:'',adPhone:''},q:'',cat:'All',tab:'in',err:'',busy:false,photo:'',toast:''};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function naira(n){return '₦'+Number(n).toLocaleString('en-NG')}
 function wa(num,text){var d=String(num||'').replace(/\D/g,'');if(!d)return '';if(d.charAt(0)==='0')d='234'+d.slice(1);else if(d.length===10)d='234'+d;return 'https://wa.me/'+d+(text?'?text='+encodeURIComponent(text):'')}
@@ -145,32 +151,35 @@ if(configured){
   var fb=initializeApp(CONFIG.firebase);auth=getAuth(fb);db=getFirestore(fb);
   onSnapshot(query(collection(db,'services'),where('status','==','approved')),function(s){S.approved=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});if(S.view==='home')renderGrid()},function(){});
   onSnapshot(doc(db,'settings','main'),function(s){if(s.exists()){S.settings=Object.assign(S.settings,s.data());if(S.view==='home')renderAd()}},function(){});
-  var unsubAll=null,unsubMine=null;
+  var unsubAll=null,unsubMine=null,unsubChats=null,unsubMsgs=null;
   onAuthStateChanged(auth,function(u){
-    S.user=u;if(unsubAll){unsubAll();unsubAll=null}if(unsubMine){unsubMine();unsubMine=null}S.all=[];S.mine=null;
+    S.user=u;if(unsubChats){unsubChats();unsubChats=null}S.chats=[];if(unsubAll){unsubAll();unsubAll=null}if(unsubMine){unsubMine();unsubMine=null}S.all=[];S.mine=null;
     if(u&&isAdmin()){unsubAll=onSnapshot(collection(db,'services'),function(s){S.all=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});if(S.view==='admin')render()},function(){})}
     else if(u){unsubMine=onSnapshot(doc(db,'services',u.uid),function(s){S.mine=s.exists()?Object.assign({id:s.id},s.data()):null;if(S.view==='join')render()},function(){})}
+    if(u){unsubChats=onSnapshot(query(collection(db,'chats'),where('participants','array-contains',u.uid)),function(s){S.chats=s.docs.map(function(d){return Object.assign({id:d.id},d.data({serverTimestamps:'estimate'}))});S.chats.sort(function(a,b){return ms(b.updatedAt)-ms(a.updatedAt)});if(S.view==='inbox')render();var bt=document.querySelector('[data-go="inbox"]');if(bt){var n=unreadCount();bt.textContent='Messages'+(n?' ('+n+')':'')}},function(){})}
+    if(!u&&(S.view==='inbox'||S.view==='chat'))S.view='home';
     if(S.view==='auth'&&u)S.view='home';render();
   });
 }
-function go(v){S.view=v;S.err='';S.photo='';render();window.scrollTo(0,0)}
+function go(v){if(v!=='chat'&&unsubMsgs){unsubMsgs();unsubMsgs=null}S.view=v;S.err='';S.photo='';render();window.scrollTo(0,0)}
 
 function header(){
   var a=[];
-  if(S.user){a.push('<button class="btn ghost small" data-go="join">'+(isAdmin()?'':'My service')+'</button>');if(isAdmin())a.push('<button class="btn small" data-go="admin">Admin</button>');a.push('<button class="btn ghost small" id="out">Sign out</button>')}
+  if(S.user){var nu=unreadCount();a.push('<button class="btn ghost small" data-go="inbox">Messages'+(nu?' ('+nu+')':'')+'</button>');a.push('<button class="btn ghost small" data-go="join">'+(isAdmin()?'':'My service')+'</button>');if(isAdmin())a.push('<button class="btn small" data-go="admin">Admin</button>');a.push('<button class="btn ghost small" id="out">Sign out</button>')}
   else a.push('<button class="btn small" data-go="auth">Sign in</button>');
   return '<div class="topbar"><div class="brandrow">Monetra</div><div class="acts">'+a.filter(function(x){return x.indexOf('></button>')<0}).join('')+'</div></div>';
 }
 function render(){
   if(!configured){app.innerHTML='<div class="wrap"><div class="panel"><h2>Almost ready</h2><p>This app needs its database connected. Open <b>config.js</b> on GitHub and paste your Firebase details.</p></div></div>';return}
-  if(S.view==='join'&&!S.user)S.view='auth';
+  if((S.view==='join'||S.view==='inbox'||S.view==='chat')&&!S.user)S.view='auth';
   var v=S.view,h='<div class="wrap">'+header();
-  if(v==='home')h+=homeView();else if(v==='auth')h+=authView();else if(v==='join')h+=joinView();else if(v==='admin'&&isAdmin())h+=adminView();else h+=homeView();
+  if(v==='home')h+=homeView();else if(v==='auth')h+=authView();else if(v==='join')h+=joinView();else if(v==='inbox')h+=inboxView();else if(v==='chat')h+=chatView();else if(v==='admin'&&isAdmin())h+=adminView();else h+=homeView();
   app.innerHTML=h+'</div>';
   if(v==='home'||S.view==='home'){renderChips();renderGrid();renderAd()}
+  if(S.view==='chat')renderMsgs();
 }
 function homeView(){
-  return '<header class="hero"><div class="brandrow"><span class="logo">M</span><b>Monetra</b></div><h1>Find any service in Jalingo.</h1><p>Tailors, repairers, tutors, riders and more. See the price, then chat on WhatsApp. Free to use, free to join.</p>'+
+  return '<header class="hero"><div class="brandrow"><span class="logo">M</span><b>Monetra</b></div><h1>Find any service in Jalingo.</h1><p>Tailors, repairers, tutors, riders and more. See the price, then chat inside the app. Free to use, free to join.</p>'+
    '<div class="heroact"><button class="btn pop" data-go="join">Offer your service</button><span class="sticker">100% free</span></div></header>'+
    '<div class="search"><input id="q" type="search" placeholder="Search: tailor, phone repair, delivery..." aria-label="Search services" autocomplete="off" value="'+esc(S.q)+'"></div>'+
    '<div class="chips" id="chips" role="group" aria-label="Categories"></div><div id="ad"></div><div class="count" id="count" aria-live="polite"></div><div class="grid" id="grid"></div>'+
@@ -191,14 +200,14 @@ function renderGrid(){
   if(!list.length){g.innerHTML='<div class="empty" style="grid-column:1/-1">'+(S.approved.length?'Nothing matches. Try a shorter word.':'No services yet. Be the first. It is free to join.')+'</div>';return}
   g.innerHTML=list.map(function(l){
     var media=l.photo?'<img src="'+esc(l.photo)+'" alt="'+esc(l.title)+'" loading="lazy">':esc(initials(l.name||l.title));
-    var link=wa(l.phone,'Hello, I saw your service "'+l.title+'" on Monetra. Are you available?');
-    return '<article class="card"><div class="tile" style="background:'+tileColor(l.cat)+'">'+(l.featured?'<span class="badge">Featured</span>':'')+media+'</div><div class="cbody"><div class="price">'+(l.price?'From '+naira(l.price):'Ask price')+'</div><h3>'+esc(l.title)+'</h3><div class="meta">'+esc(l.name)+' · '+esc(l.area)+'</div>'+(l.desc?'<div class="desc">'+esc(l.desc)+'</div>':'')+'<div class="spacer"></div>'+(link?'<a class="btn wa" href="'+esc(link)+'" target="_blank" rel="noopener">Chat on WhatsApp</a>':'')+'</div></article>';
+    var mine=S.user&&S.user.uid===l.id;
+    return '<article class="card"><div class="tile" style="background:'+tileColor(l.cat)+'">'+(l.featured?'<span class="badge">Featured</span>':'')+media+'</div><div class="cbody"><div class="price">'+(l.price?'From '+naira(l.price):'Ask price')+'</div><h3>'+esc(l.title)+'</h3><div class="meta">'+esc(l.name)+' · '+esc(l.area)+'</div>'+(l.desc?'<div class="desc">'+esc(l.desc)+'</div>':'')+'<div class="spacer"></div>'+(mine?'<span class="btn wa" aria-disabled="true">Your service</span>':'<button class="btn wa" type="button" data-chat="'+esc(l.id)+'" data-title="'+esc(l.title)+'" data-pname="'+esc(l.name)+'">Chat now</button>')+'</div></article>';
   }).join('');
 }
 function authView(){
   var up=S.tab==='up';
   return '<div class="panel"><div class="tabs"><button class="chip" data-tab="in" aria-pressed="'+!up+'">Sign in</button><button class="chip" data-tab="up" aria-pressed="'+up+'">Create account</button></div>'+
-   '<div class="form"><label class="full">Email<input id="a_email" type="email" autocomplete="email" inputmode="email"></label><label class="full">Password (6 or more characters)<input id="a_pass" type="password" autocomplete="'+(up?'new-password':'current-password')+'"></label>'+
+   '<div class="form">'+(up?'<label class="full">Your name<input id="a_name" maxlength="40" autocomplete="name"></label>':'')+'<label class="full">Email<input id="a_email" type="email" autocomplete="email" inputmode="email"></label><label class="full">Password (6 or more characters)<input id="a_pass" type="password" autocomplete="'+(up?'new-password':'current-password')+'"></label>'+
    '<div class="full err" id="err" role="alert">'+esc(S.err)+'</div><div class="full"><button class="btn" id="authGo" type="button">'+(up?'Create account':'Sign in')+'</button> <button class="btn ghost" data-go="home" type="button">Back</button></div></div></div>';
 }
 function joinView(){
@@ -210,7 +219,6 @@ function joinView(){
    '<div class="form"><label class="full">What do you do? (example: Phone screen repair)<input id="j_title" maxlength="80" value="'+esc(d.title)+'"></label>'+
    '<label>Your name<input id="j_name" maxlength="40" value="'+esc(d.name)+'"></label><label>Starting price (₦)<input id="j_price" inputmode="numeric" value="'+esc(d.price||'')+'"></label>'+
    '<label>Category<select id="j_cat">'+opts+'</select></label><label>Area<input id="j_area" list="areas" maxlength="40" value="'+esc(d.area)+'"></label><datalist id="areas">'+dl+'</datalist>'+
-   '<label class="full">WhatsApp number<input id="j_phone" inputmode="tel" placeholder="08012345678" value="'+esc(d.phone)+'"></label>'+
    '<label class="full">About your service<textarea id="j_desc" rows="3" maxlength="200">'+esc(d.desc)+'</textarea></label>'+
    '<label class="full">Photo<input id="j_photo" type="file" accept="image/*"></label>'+
    '<div class="full agree"><label class="check" style="flex-direction:row;gap:8px;color:var(--ink);font-size:.9rem"><input id="j_agree" type="checkbox" style="width:auto"'+(d.agreed?' checked':'')+'> <span>I agree that Monetra takes <b>'+esc(c)+'%</b> of the payment for jobs that come through the app. It is free to join.</span></label></div>'+
@@ -218,7 +226,7 @@ function joinView(){
 }
 function adminView(){
   var p=S.all.filter(function(x){return x.status==='pending'}),a=S.all.filter(function(x){return x.status==='approved'});
-  function row(x,acts){return '<div class="row"><div class="nm"><b>'+esc(x.title)+'</b><br><small>'+esc(x.name)+' · '+esc(x.phone)+' · '+esc(x.ownerEmail)+'</small></div><div class="acts">'+acts+'</div></div>'}
+  function row(x,acts){return '<div class="row"><div class="nm"><b>'+esc(x.title)+'</b><br><small>'+esc(x.name)+' · '+esc(x.area)+'</small></div><div class="acts">'+acts+'</div></div>'}
   var s=S.settings;
   return '<div class="back"><button class="btn ghost small" data-go="home">Back to app</button></div>'+
    '<div class="panel"><h2>Waiting for approval ('+p.length+')</h2><div class="rows">'+p.map(function(x){return row(x,'<button class="btn small" data-act="approve" data-id="'+x.id+'">Approve</button><button class="btn danger small" data-act="remove" data-id="'+x.id+'">Reject</button>')}).join('')+(p.length?'':'<div class="empty">Nothing waiting.</div>')+'</div></div>'+
@@ -227,14 +235,60 @@ function adminView(){
    '<label class="full">Advertiser name (empty shows Your shop here)<input id="s_adt" value="'+esc(s.adTitle)+'"></label><label class="full">Advertiser message<input id="s_adm" value="'+esc(s.adText)+'"></label><label class="full">Advertiser WhatsApp<input id="s_adp" inputmode="tel" value="'+esc(s.adPhone)+'"></label>'+
    '<div class="full"><button class="btn" id="saveSet" type="button">Save settings</button></div></div></div>';
 }
+
+function ms(t){return t&&t.toMillis?t.toMillis():Date.now()}
+function getSeen(id){try{return Number(localStorage.getItem('seen_'+id))||0}catch(e){return 0}}
+function markSeen(id){try{localStorage.setItem('seen_'+id,String(Date.now()))}catch(e){}}
+function isUnread(c){return !!S.user&&!!c.lastFrom&&c.lastFrom!==S.user.uid&&ms(c.updatedAt)>getSeen(c.id)}
+function unreadCount(){return S.chats.filter(isUnread).length}
+function otherName(c){return S.user&&S.user.uid===c.providerUid?(c.buyerName||'Customer'):(c.providerName||'Provider')}
+function inboxView(){
+  var rows=S.chats.map(function(c){return '<div class="row"><div class="nm"><b>'+esc(otherName(c))+'</b>'+(isUnread(c)?' <span class="pill ok">New</span>':'')+'<br><small>'+esc(c.serviceTitle||'')+(c.lastText?' · '+esc(c.lastText):'')+'</small></div><button class="btn small" data-open="'+esc(c.id)+'" type="button">Open</button></div>'}).join('');
+  return '<div class="back"><button class="btn ghost small" data-go="home">Back</button></div><div class="panel"><h2>Messages</h2><div class="rows">'+(rows||'<div class="empty">No messages yet. Open a service and tap Chat now.</div>')+'</div></div>';
+}
+function chatView(){
+  var c=S.chatMeta||S.chats.find(function(x){return x.id===S.chatId})||{};
+  return '<div class="back"><button class="btn ghost small" data-go="inbox">Back</button></div><div class="panel"><h2>'+esc(otherName(c))+'</h2><div class="note">'+esc(c.serviceTitle||'')+'</div><div class="msgs" id="msgs" aria-live="polite"></div><div class="sendrow"><input id="m_in" maxlength="1000" placeholder="Type a message" autocomplete="off"><button class="btn" id="sendBtn" type="button">Send</button></div><div class="note">Agree the price and details here.</div></div>';
+}
+function renderMsgs(){
+  var el=document.getElementById('msgs');if(!el)return;
+  el.innerHTML=S.msgs.length?S.msgs.map(function(m){return '<div class="b'+(S.user&&m.from===S.user.uid?' me':'')+'">'+esc(m.text)+'</div>'}).join(''):'<div class="note">Say hello. Write what you need and the price you can pay.</div>';
+  el.scrollTop=el.scrollHeight;
+}
+function showChat(id){
+  if(unsubMsgs){unsubMsgs();unsubMsgs=null}
+  S.chatId=id;S.msgs=[];S.chatMeta=S.chats.find(function(x){return x.id===id})||S.chatMeta;
+  markSeen(id);S.view='chat';render();window.scrollTo(0,0);
+  unsubMsgs=onSnapshot(query(collection(db,'chats',id,'messages'),orderBy('at')),function(s){S.msgs=s.docs.map(function(d){return d.data({serverTimestamps:'estimate'})});markSeen(id);renderMsgs()},function(){toast('Could not load messages.')});
+}
+async function openChat(pid,title,pname){
+  if(!S.user){S.tab='in';go('auth');return}
+  if(pid===S.user.uid){toast('This is your own service.');return}
+  var id=pid+'_'+S.user.uid;
+  var meta={providerUid:pid,buyerUid:S.user.uid,participants:[pid,S.user.uid],providerName:pname||'Provider',buyerName:S.user.displayName||'Customer',serviceTitle:title||''};
+  try{await setDoc(doc(db,'chats',id),meta,{merge:true})}catch(e){toast('Could not open the chat. Try again.');return}
+  S.chatMeta=Object.assign({id:id},meta);showChat(id);
+}
+async function sendMsg(){
+  var inp=document.getElementById('m_in');if(!inp||!S.user||!S.chatId)return;
+  var txt=inp.value.trim().slice(0,1000);if(!txt)return;inp.value='';
+  try{
+    await addDoc(collection(db,'chats',S.chatId,'messages'),{from:S.user.uid,text:txt,at:serverTimestamp()});
+    await updateDoc(doc(db,'chats',S.chatId),{lastText:txt.slice(0,80),lastFrom:S.user.uid,updatedAt:serverTimestamp()});
+  }catch(e){inp.value=txt;toast('Message not sent. Check your connection.')}
+}
 function resize(file){return new Promise(function(res,rej){var r=new FileReader();r.onerror=rej;r.onload=function(){var im=new Image();im.onerror=rej;im.onload=function(){var m=480,s=Math.min(1,m/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);var q=.72,u=c.toDataURL('image/jpeg',q);while(u.length>140000&&q>.3){q-=.1;u=c.toDataURL('image/jpeg',q)}res(u)};im.src=r.result};r.readAsDataURL(file)})}
 function authErr(e){var c=e&&e.code||'';if(c.indexOf('invalid-email')>-1)return 'That email does not look right.';if(c.indexOf('weak-password')>-1)return 'Use a password with at least 6 characters.';if(c.indexOf('email-already')>-1)return 'This email already has an account. Tap Sign in.';if(c.indexOf('invalid-credential')>-1||c.indexOf('wrong-password')>-1||c.indexOf('user-not-found')>-1)return 'Wrong email or password.';if(c.indexOf('network')>-1)return 'No connection. Check your data and try again.';return 'Something went wrong. Try again.'}
 function setErr(m){S.err=m;var e=document.getElementById('err');if(e)e.textContent=m}
 
+app.addEventListener('keydown',function(e){if(e.target.id==='m_in'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
 app.addEventListener('input',function(e){if(e.target.id==='q'){S.q=e.target.value;renderGrid()}});
 app.addEventListener('change',function(e){if(e.target.id==='j_photo'){var f=e.target.files&&e.target.files[0];if(!f)return;resize(f).then(function(d){S.photo=d;toast('Photo ready')}).catch(function(){toast('Could not read that photo.')})}});
 app.addEventListener('click',async function(e){
   var t=e.target.closest('button,a');if(!t)return;
+  if(t.dataset.chat){openChat(t.dataset.chat,t.dataset.title,t.dataset.pname);return}
+  if(t.dataset.open){showChat(t.dataset.open);return}
+  if(t.id==='sendBtn'){sendMsg();return}
   if(t.dataset.go){go(t.dataset.go);return}
   if(t.dataset.cat){S.cat=t.dataset.cat;renderChips();renderGrid();return}
   if(t.dataset.tab){S.tab=t.dataset.tab;S.err='';render();return}
@@ -242,14 +296,14 @@ app.addEventListener('click',async function(e){
   if(t.id==='authGo'){
     var em=document.getElementById('a_email').value.trim(),pw=document.getElementById('a_pass').value;
     if(!em||!pw){setErr('Enter your email and password.');return}
-    t.disabled=true;try{if(S.tab==='up')await createUserWithEmailAndPassword(auth,em,pw);else await signInWithEmailAndPassword(auth,em,pw)}catch(x){setErr(authErr(x));t.disabled=false}return}
+    t.disabled=true;try{if(S.tab==='up'){var nm=(document.getElementById('a_name').value||'').trim();if(!nm){setErr('Enter your name.');t.disabled=false;return}var cr=await createUserWithEmailAndPassword(auth,em,pw);try{await updateProfile(cr.user,{displayName:nm})}catch(z){}}else await signInWithEmailAndPassword(auth,em,pw)}catch(x){setErr(authErr(x));t.disabled=false}return}
   if(t.id==='joinGo'){
     var g=function(i){return document.getElementById(i).value.trim()};
-    var title=g('j_title'),name=g('j_name'),phone=g('j_phone');
-    if(!title||!name||!phone){setErr('Fill in what you do, your name and your WhatsApp number.');return}
+    var title=g('j_title'),name=g('j_name');
+    if(!title||!name){setErr('Fill in what you do and your name.');return}
     if(!document.getElementById('j_agree').checked){setErr('Please tick the box to agree to the commission.');return}
     var d=S.mine||{},price=parseInt(g('j_price').replace(/\D/g,''),10)||0;
-    var data={ownerUid:S.user.uid,ownerEmail:S.user.email,title:title,name:name,phone:phone,price:price,cat:document.getElementById('j_cat').value,area:g('j_area')||'Jalingo',desc:g('j_desc'),photo:S.photo||d.photo||'',agreed:true,commission:Number(S.settings.commission)||7,featured:!!d.featured,status:d.id?(d.status==='approved'?'pending':d.status):'pending'};
+    var data={ownerUid:S.user.uid,title:title,name:name,price:price,cat:document.getElementById('j_cat').value,area:g('j_area')||'Jalingo',desc:g('j_desc'),photo:S.photo||d.photo||'',agreed:true,commission:Number(S.settings.commission)||7,featured:!!d.featured,status:d.id?(d.status==='approved'?'pending':d.status):'pending'};
     if(!d.id)data.createdAt=serverTimestamp();
     t.disabled=true;try{await setDoc(doc(db,'services',S.user.uid),data,{merge:true});toast(d.id?'Saved.':'Sent. We will approve it soon.');S.photo='';go('join')}catch(x){setErr('Could not save. Check your connection and try again.');t.disabled=false}return}
   if(t.id==='delMine'){if(t.dataset.sure!=='1'){t.dataset.sure='1';t.textContent='Tap again to delete';return}try{await deleteDoc(doc(db,'services',S.user.uid));toast('Deleted.');go('home')}catch(x){setErr('Could not delete.')}return}
