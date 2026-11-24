@@ -105,151 +105,163 @@ footer{margin-top:22px;color:var(--muted);font-size:.8rem;display:flex;justify-c
 .bar .btn{background:var(--pop-ink);color:var(--pop)}
 .toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:.9rem;z-index:20;max-width:90vw}
 @media (prefers-reduced-motion:no-preference){.card{transition:transform .15s}.card:hover{transform:translateY(-2px)}}
+
+.tabs{display:flex;gap:8px;margin:14px 0}
+.tabs .chip[aria-pressed="true"]{background:var(--brand);color:var(--brand-ink)}
+.note{color:var(--muted);font-size:.85rem;margin:6px 0}
+.err{color:var(--danger);font-size:.88rem;margin:8px 0;min-height:1em}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 0 4px}
+.topbar .brandrow{font:700 1.15rem var(--font-display)}
+.topbar .acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.agree{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:.88rem}
+.pill{display:inline-block;font:600 .7rem var(--font-body);text-transform:uppercase;letter-spacing:.04em;padding:3px 8px;border-radius:6px;background:var(--line);color:var(--ink)}
+.pill.ok{background:var(--brand);color:var(--brand-ink)}
+.pill.bad{background:var(--danger);color:#fff}
+.back{margin:12px 0}
 </style></head><body>
 <div id="app"></div>
-<script>
-(function(){
-var CATS=['Phones & Gadgets','Fashion','Food','Home & Furniture','Services','Other'];
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,query,where,onSnapshot,serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {CONFIG} from "./config.js";
+
+var CATS=['Phones & Gadgets','Fashion & Tailoring','Food','Home & Repairs','Beauty','Tutoring','Transport & Delivery','Other'];
 var AREAS=['Sabon Gari','Barade','Magami','Mayo Gwoi'];
-var state={settings:{ownerWhatsApp:'',fees:'',adTitle:'',adText:'',adPhone:''},listings:[]};
-var q='',cat='All',isOwner=false,dirty=false,manage=false,pendingDelete=null,formPhoto='';
 var app=document.getElementById('app');
+var configured=CONFIG&&CONFIG.firebase&&CONFIG.firebase.apiKey&&CONFIG.firebase.apiKey.indexOf('PASTE')<0;
+var S={view:'home',user:null,approved:[],all:[],settings:{commission:7,whatsapp:'',adTitle:'',adText:'',adPhone:''},q:'',cat:'All',tab:'in',err:'',busy:false,photo:'',toast:''};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function naira(n){return '₦'+Number(n).toLocaleString('en-NG')}
-function wa(num,text){
-  var d=String(num||'').replace(/\D/g,'');if(!d)return '';
-  if(d.charAt(0)==='0')d='234'+d.slice(1);else if(d.length===10)d='234'+d;
-  return 'https://wa.me/'+d+(text?'?text='+encodeURIComponent(text):'');
-}
-function toast(m){var t=document.createElement('div');t.className='toast';t.setAttribute('role','status');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},3200)}
-function tileColor(c){var i=Math.max(0,CATS.indexOf(c))%5+1;return 'var(--t'+i+')'}
+function wa(num,text){var d=String(num||'').replace(/\D/g,'');if(!d)return '';if(d.charAt(0)==='0')d='234'+d.slice(1);else if(d.length===10)d='234'+d;return 'https://wa.me/'+d+(text?'?text='+encodeURIComponent(text):'')}
+function tileColor(c){return 'var(--t'+(Math.max(0,CATS.indexOf(c))%5+1)+')'}
 function initials(s){return String(s).trim().split(/\s+/).slice(0,2).map(function(w){return w.charAt(0)}).join('').toUpperCase()}
+function toast(m){var t=document.createElement('div');t.className='toast';t.setAttribute('role','status');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},3200)}
+function isAdmin(){return !!(S.user&&S.user.email&&CONFIG.adminEmail&&S.user.email.toLowerCase()===String(CONFIG.adminEmail).toLowerCase())}
+function myDoc(){return S.user?S.all.find(function(x){return x.id===S.user.uid})||S.mine||null:null}
 
-function shell(){
-  app.innerHTML='<div class="wrap">'+
-  '<header class="hero"><div class="brandrow"><span class="logo">J</span><b>Monetra</b></div>'+
-  '<h1>Everything in Jalingo, one search away.</h1><p>See the price, then chat the seller on WhatsApp. Free to use, free to sell.</p>'+
-  '<div class="heroact"><button class="btn pop" id="goSell" type="button">Sell your item free</button><span class="sticker">100% free</span></div></header>'+
-  '<div class="ticker" aria-hidden="true"><div class="tk">'+CATS.concat(CATS).map(function(c){return '<span>'+esc(c)+'</span>'}).join('')+'</div></div>'+
-  '<div class="search"><input id="q" type="search" placeholder="Search: phone, ankara, shoes, repair..." aria-label="Search listings" autocomplete="off"></div>'+
-  '<div class="chips" id="chips" role="group" aria-label="Categories"></div>'+
-  '<div id="ad"></div>'+
-  '<div class="count" id="count" aria-live="polite"></div>'+
-  '<div class="grid" id="grid"></div>'+
-  '<section class="sell" id="sell"></section>'+
-  '<footer><span>Monetra. Always meet in a public place and check the item before you pay.</span><span id="own"></span></footer>'+
-  '<div id="admin"></div><div id="barHost"></div></div>';
-  renderChips();renderGrid();renderSell();renderAd();renderOwner();
-}
-function renderChips(){
-  var all=['All'].concat(CATS);
-  document.getElementById('chips').innerHTML=all.map(function(c){return '<button type="button" class="chip" style="--c:'+(c==='All'?'var(--surface)':tileColor(c))+'" data-cat="'+esc(c)+'" aria-pressed="'+(c===cat)+'">'+esc(c)+'</button>'}).join('');
-}
-function visible(){
-  var t=q.trim().toLowerCase();
-  var list=state.listings.filter(function(l){
-    if(cat!=='All'&&l.cat!==cat)return false;
-    if(!t)return true;
-    return (l.title+' '+l.desc+' '+l.area+' '+l.cat+' '+l.seller).toLowerCase().indexOf(t)>-1;
+var auth,db;
+if(configured){
+  var fb=initializeApp(CONFIG.firebase);auth=getAuth(fb);db=getFirestore(fb);
+  onSnapshot(query(collection(db,'services'),where('status','==','approved')),function(s){S.approved=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});if(S.view==='home')renderGrid()},function(){});
+  onSnapshot(doc(db,'settings','main'),function(s){if(s.exists()){S.settings=Object.assign(S.settings,s.data());if(S.view==='home')renderAd()}},function(){});
+  var unsubAll=null,unsubMine=null;
+  onAuthStateChanged(auth,function(u){
+    S.user=u;if(unsubAll){unsubAll();unsubAll=null}if(unsubMine){unsubMine();unsubMine=null}S.all=[];S.mine=null;
+    if(u&&isAdmin()){unsubAll=onSnapshot(collection(db,'services'),function(s){S.all=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});if(S.view==='admin')render()},function(){})}
+    else if(u){unsubMine=onSnapshot(doc(db,'services',u.uid),function(s){S.mine=s.exists()?Object.assign({id:s.id},s.data()):null;if(S.view==='join')render()},function(){})}
+    if(S.view==='auth'&&u)S.view='home';render();
   });
-  list.sort(function(a,b){return (b.featured?1:0)-(a.featured?1:0)});
-  return list;
 }
-function renderGrid(){
-  var list=visible();
-  document.getElementById('count').textContent=list.length+(list.length===1?' item':' items')+(q||cat!=='All'?' found':' for sale');
-  var g=document.getElementById('grid');
-  if(!list.length){g.innerHTML='<div class="empty" style="grid-column:1/-1">Nothing matches yet. Try a shorter word, or sell it yourself with the button above.</div>';return}
-  g.innerHTML=list.map(function(l){
-    var badge=l.sold?'<span class="badge sold">Sold</span>':(l.sample?'<span class="badge sample">Sample</span>':(l.featured?'<span class="badge">Featured</span>':''));
-    var media=l.photo?'<img src="'+esc(l.photo)+'" alt="'+esc(l.title)+'" loading="lazy">':esc(initials(l.title));
-    var link=(!l.sold&&!l.sample)?wa(l.phone,'Hello, I saw "'+l.title+'" ('+(l.price?naira(l.price):'price?')+') on Monetra. Is it still available?'):'';
-    var btn=link?'<a class="btn wa" href="'+esc(link)+'" target="_blank" rel="noopener">Chat on WhatsApp</a>':'<span class="btn wa" aria-disabled="true">'+(l.sold?'Sold':(l.sample?'Example listing':'No contact'))+'</span>';
-    return '<article class="card"><div class="tile" style="background:'+tileColor(l.cat)+'">'+badge+media+'</div>'+
-      '<div class="cbody"><div class="price">'+(l.price?naira(l.price):'Ask price')+'</div><h3>'+esc(l.title)+'</h3>'+
-      '<div class="meta">'+esc(l.area)+' · '+esc(l.seller)+'</div>'+(l.desc?'<div class="desc">'+esc(l.desc)+'</div>':'')+'<div class="spacer"></div>'+btn+'</div></article>';
-  }).join('');
+function go(v){S.view=v;S.err='';S.photo='';render();window.scrollTo(0,0)}
+
+function header(){
+  var a=[];
+  if(S.user){a.push('<button class="btn ghost small" data-go="join">'+(isAdmin()?'':'My service')+'</button>');if(isAdmin())a.push('<button class="btn small" data-go="admin">Admin</button>');a.push('<button class="btn ghost small" id="out">Sign out</button>')}
+  else a.push('<button class="btn small" data-go="auth">Sign in</button>');
+  return '<div class="topbar"><div class="brandrow">Monetra</div><div class="acts">'+a.filter(function(x){return x.indexOf('></button>')<0}).join('')+'</div></div>';
 }
+function render(){
+  if(!configured){app.innerHTML='<div class="wrap"><div class="panel"><h2>Almost ready</h2><p>This app needs its database connected. Open <b>config.js</b> on GitHub and paste your Firebase details.</p></div></div>';return}
+  if(S.view==='join'&&!S.user)S.view='auth';
+  var v=S.view,h='<div class="wrap">'+header();
+  if(v==='home')h+=homeView();else if(v==='auth')h+=authView();else if(v==='join')h+=joinView();else if(v==='admin'&&isAdmin())h+=adminView();else h+=homeView();
+  app.innerHTML=h+'</div>';
+  if(v==='home'||S.view==='home'){renderChips();renderGrid();renderAd()}
+}
+function homeView(){
+  return '<header class="hero"><div class="brandrow"><span class="logo">M</span><b>Monetra</b></div><h1>Find any service in Jalingo.</h1><p>Tailors, repairers, tutors, riders and more. See the price, then chat on WhatsApp. Free to use, free to join.</p>'+
+   '<div class="heroact"><button class="btn pop" data-go="join">Offer your service</button><span class="sticker">100% free</span></div></header>'+
+   '<div class="search"><input id="q" type="search" placeholder="Search: tailor, phone repair, delivery..." aria-label="Search services" autocomplete="off" value="'+esc(S.q)+'"></div>'+
+   '<div class="chips" id="chips" role="group" aria-label="Categories"></div><div id="ad"></div><div class="count" id="count" aria-live="polite"></div><div class="grid" id="grid"></div>'+
+   '<footer><span>Meet in a public place and check the work before you pay.</span></footer>';
+}
+function renderChips(){var el=document.getElementById('chips');if(!el)return;el.innerHTML=['All'].concat(CATS).map(function(c){return '<button type="button" class="chip" style="--c:'+(c==='All'?'var(--surface)':tileColor(c))+'" data-cat="'+esc(c)+'" aria-pressed="'+(c===S.cat)+'">'+esc(c)+'</button>'}).join('')}
 function renderAd(){
-  var s=state.settings,el=document.getElementById('ad');
+  var el=document.getElementById('ad');if(!el)return;var s=S.settings;
   var title=s.adTitle||'Your shop here',text=s.adText||'Reach people in Jalingo every day. Advertise on Monetra.';
-  var link=wa(s.adTitle?s.adPhone:s.ownerWhatsApp,s.adTitle?'Hello, I saw your ad on Monetra.':'Hello, I want to advertise on Monetra.');
+  var link=wa(s.adTitle?s.adPhone:s.whatsapp,s.adTitle?'Hello, I saw your ad on Monetra.':'Hello, I want to advertise on Monetra.');
   el.innerHTML='<div class="ad"><div><span class="tag">'+(s.adTitle?'Ad':'Advertise here')+'</span><b>'+esc(title)+'</b><small>'+esc(text)+'</small></div>'+(link?'<a class="btn small" href="'+esc(link)+'" target="_blank" rel="noopener">'+(s.adTitle?'Chat':'Ask about ads')+'</a>':'')+'</div>';
 }
-function renderSell(){
-  var s=state.settings,link=wa(s.ownerWhatsApp,'Hello, I want to sell on Monetra.');
-  document.getElementById('sell').innerHTML='<h2>Sell on Monetra</h2>'+
-   '<p>Stop posting on your status where it disappears in a day. Put it here and let buyers find it, see the price and chat with you.</p>'+
-   '<div class="steps"><div>1. Send us the photo, name, price and your WhatsApp number.</div><div>2. We post it for you, free.</div><div>3. Buyers chat you directly on WhatsApp.</div></div>'+
-   '<p><strong>Free for sellers.</strong> '+esc(s.fees)+'</p>'+
-   (link?'<p><a class="btn pop" href="'+esc(link)+'" target="_blank" rel="noopener">Post my item free</a></p>':'<p>Contact number coming soon.</p>');
+function renderGrid(){
+  var g=document.getElementById('grid');if(!g)return;var t=S.q.trim().toLowerCase();
+  var list=S.approved.filter(function(l){if(S.cat!=='All'&&l.cat!==S.cat)return false;if(!t)return true;return (l.title+' '+l.desc+' '+l.area+' '+l.cat+' '+l.name).toLowerCase().indexOf(t)>-1});
+  list.sort(function(a,b){return (b.featured?1:0)-(a.featured?1:0)});
+  document.getElementById('count').textContent=list.length+(list.length===1?' service':' services')+(t||S.cat!=='All'?' found':' available');
+  if(!list.length){g.innerHTML='<div class="empty" style="grid-column:1/-1">'+(S.approved.length?'Nothing matches. Try a shorter word.':'No services yet. Be the first. It is free to join.')+'</div>';return}
+  g.innerHTML=list.map(function(l){
+    var media=l.photo?'<img src="'+esc(l.photo)+'" alt="'+esc(l.title)+'" loading="lazy">':esc(initials(l.name||l.title));
+    var link=wa(l.phone,'Hello, I saw your service "'+l.title+'" on Monetra. Are you available?');
+    return '<article class="card"><div class="tile" style="background:'+tileColor(l.cat)+'">'+(l.featured?'<span class="badge">Featured</span>':'')+media+'</div><div class="cbody"><div class="price">'+(l.price?'From '+naira(l.price):'Ask price')+'</div><h3>'+esc(l.title)+'</h3><div class="meta">'+esc(l.name)+' · '+esc(l.area)+'</div>'+(l.desc?'<div class="desc">'+esc(l.desc)+'</div>':'')+'<div class="spacer"></div>'+(link?'<a class="btn wa" href="'+esc(link)+'" target="_blank" rel="noopener">Chat on WhatsApp</a>':'')+'</div></article>';
+  }).join('');
 }
-function renderOwner(){
-  document.getElementById('own').innerHTML=isOwner?'<button class="btn ghost small" id="mng" type="button">'+(manage?'Close manager':'Manage listings')+'</button>':'';
-  var a=document.getElementById('admin');
-  if(!isOwner||!manage){a.innerHTML='';renderBar();return}
-  var opts=CATS.map(function(c){return '<option>'+esc(c)+'</option>'}).join('');
-  var dl=AREAS.map(function(c){return '<option value="'+esc(c)+'">'}).join('');
-  a.innerHTML='<div class="panel"><h2>Add a listing</h2><div class="form">'+
-   '<label class="full">Item name<input id="f_title" maxlength="80"></label>'+
-   '<label>Price (₦)<input id="f_price" inputmode="numeric"></label>'+
-   '<label>Category<select id="f_cat">'+opts+'</select></label>'+
-   '<label>Area<input id="f_area" list="areas" maxlength="40"></label><datalist id="areas">'+dl+'</datalist>'+
-   '<label>Seller name<input id="f_seller" maxlength="40"></label>'+
-   '<label class="full">Seller WhatsApp number<input id="f_phone" inputmode="tel" placeholder="08012345678"></label>'+
-   '<label class="full">Short description<textarea id="f_desc" rows="2" maxlength="160"></textarea></label>'+
-   '<label class="full">Photo<input id="f_photo" type="file" accept="image/*"></label>'+
-   '<label class="check full"><input id="f_feat" type="checkbox"> Featured (shows first)</label>'+
-   '<div class="full"><button class="btn" id="addBtn" type="button">Add listing</button></div></div></div>'+
-   '<div class="panel"><h2>Your listings</h2><div class="rows">'+state.listings.map(function(l){
-     var del=pendingDelete===l.id;
-     return '<div class="row"><div class="nm">'+esc(l.title)+(l.sample?' (sample)':'')+'</div><div class="acts">'+
-      '<button class="btn ghost small" data-act="feat" data-id="'+l.id+'" type="button">'+(l.featured?'Unfeature':'Feature')+'</button>'+
-      '<button class="btn ghost small" data-act="sold" data-id="'+l.id+'" type="button">'+(l.sold?'Mark available':'Mark sold')+'</button>'+
-      '<button class="btn danger small" data-act="del" data-id="'+l.id+'" type="button">'+(del?'Tap again to delete':'Delete')+'</button></div></div>';
-   }).join('')+(state.listings.length?'':'<div class="empty">No listings yet.</div>')+'</div></div>'+
-   '<div class="panel"><h2>Your contact and ad spot</h2><div class="form">'+
-   '<label class="full">Your WhatsApp number (sellers message this)<input id="s_phone" inputmode="tel" value="'+esc(state.settings.ownerWhatsApp)+'"></label>'+
-   '<label class="full">Note shown to sellers<textarea id="s_fees" rows="2">'+esc(state.settings.fees)+'</textarea></label>'+'<label class="full">Advertiser name (empty shows Your shop here)<input id="s_adt" value="'+esc(state.settings.adTitle)+'"></label>'+'<label class="full">Advertiser message<input id="s_adm" value="'+esc(state.settings.adText)+'"></label>'+'<label class="full">Advertiser WhatsApp number<input id="s_adp" inputmode="tel" value="'+esc(state.settings.adPhone)+'"></label>'+
-   '<div class="full"><button class="btn" id="saveSet" type="button">Save contact and fees</button></div></div></div>';
-  renderBar();
+function authView(){
+  var up=S.tab==='up';
+  return '<div class="panel"><div class="tabs"><button class="chip" data-tab="in" aria-pressed="'+!up+'">Sign in</button><button class="chip" data-tab="up" aria-pressed="'+up+'">Create account</button></div>'+
+   '<div class="form"><label class="full">Email<input id="a_email" type="email" autocomplete="email" inputmode="email"></label><label class="full">Password (6 or more characters)<input id="a_pass" type="password" autocomplete="'+(up?'new-password':'current-password')+'"></label>'+
+   '<div class="full err" id="err" role="alert">'+esc(S.err)+'</div><div class="full"><button class="btn" id="authGo" type="button">'+(up?'Create account':'Sign in')+'</button> <button class="btn ghost" data-go="home" type="button">Back</button></div></div></div>';
 }
-function renderBar(){
-  document.getElementById('barHost').innerHTML=dirty?'<div class="bar"><span>You have changes that are not live yet.</span><button class="btn" id="pub" type="button">Publish changes</button></div>':'';
+function joinView(){
+  var d=S.mine||{},st=d.status,c=S.settings.commission;
+  var opts=CATS.map(function(x){return '<option'+(x===d.cat?' selected':'')+'>'+esc(x)+'</option>'}).join('');
+  var dl=AREAS.map(function(x){return '<option value="'+esc(x)+'">'}).join('');
+  return '<div class="panel"><h2>'+(d.id?'Your service':'Offer your service')+'</h2>'+
+   (st?'<p>Status: <span class="pill '+(st==='approved'?'ok':st==='removed'?'bad':'')+'">'+(st==='approved'?'Live':st==='pending'?'Waiting for approval':'Removed')+'</span></p>':'')+
+   '<div class="form"><label class="full">What do you do? (example: Phone screen repair)<input id="j_title" maxlength="80" value="'+esc(d.title)+'"></label>'+
+   '<label>Your name<input id="j_name" maxlength="40" value="'+esc(d.name)+'"></label><label>Starting price (₦)<input id="j_price" inputmode="numeric" value="'+esc(d.price||'')+'"></label>'+
+   '<label>Category<select id="j_cat">'+opts+'</select></label><label>Area<input id="j_area" list="areas" maxlength="40" value="'+esc(d.area)+'"></label><datalist id="areas">'+dl+'</datalist>'+
+   '<label class="full">WhatsApp number<input id="j_phone" inputmode="tel" placeholder="08012345678" value="'+esc(d.phone)+'"></label>'+
+   '<label class="full">About your service<textarea id="j_desc" rows="3" maxlength="200">'+esc(d.desc)+'</textarea></label>'+
+   '<label class="full">Photo<input id="j_photo" type="file" accept="image/*"></label>'+
+   '<div class="full agree"><label class="check" style="flex-direction:row;gap:8px;color:var(--ink);font-size:.9rem"><input id="j_agree" type="checkbox" style="width:auto"'+(d.agreed?' checked':'')+'> <span>I agree that Monetra takes <b>'+esc(c)+'%</b> of the payment for jobs that come through the app. It is free to join.</span></label></div>'+
+   '<div class="full err" id="err" role="alert">'+esc(S.err)+'</div><div class="full"><button class="btn" id="joinGo" type="button">'+(d.id?'Save changes':'Send for approval')+'</button> <button class="btn ghost" data-go="home" type="button">Back</button>'+(d.id?' <button class="btn danger" id="delMine" type="button">Delete my service</button>':'')+'</div></div></div>';
 }
-function markDirty(){dirty=true;renderBar()}
-function resize(file){return new Promise(function(res,rej){
-  var r=new FileReader();r.onerror=rej;r.onload=function(){var im=new Image();im.onerror=rej;im.onload=function(){
-    var m=520,s=Math.min(1,m/Math.max(im.width,im.height)),c=document.createElement('canvas');
-    c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.72))};im.src=r.result};r.readAsDataURL(file)})}
+function adminView(){
+  var p=S.all.filter(function(x){return x.status==='pending'}),a=S.all.filter(function(x){return x.status==='approved'});
+  function row(x,acts){return '<div class="row"><div class="nm"><b>'+esc(x.title)+'</b><br><small>'+esc(x.name)+' · '+esc(x.phone)+' · '+esc(x.ownerEmail)+'</small></div><div class="acts">'+acts+'</div></div>'}
+  var s=S.settings;
+  return '<div class="back"><button class="btn ghost small" data-go="home">Back to app</button></div>'+
+   '<div class="panel"><h2>Waiting for approval ('+p.length+')</h2><div class="rows">'+p.map(function(x){return row(x,'<button class="btn small" data-act="approve" data-id="'+x.id+'">Approve</button><button class="btn danger small" data-act="remove" data-id="'+x.id+'">Reject</button>')}).join('')+(p.length?'':'<div class="empty">Nothing waiting.</div>')+'</div></div>'+
+   '<div class="panel"><h2>Live services ('+a.length+')</h2><div class="rows">'+a.map(function(x){return row(x,'<button class="btn ghost small" data-act="feat" data-id="'+x.id+'">'+(x.featured?'Unfeature':'Feature')+'</button><button class="btn danger small" data-act="remove" data-id="'+x.id+'">Remove</button>')}).join('')+(a.length?'':'<div class="empty">No live services yet.</div>')+'</div></div>'+
+   '<div class="panel"><h2>Your settings</h2><div class="form"><label>Commission (%)<input id="s_comm" inputmode="numeric" value="'+esc(s.commission)+'"></label><label>Your WhatsApp<input id="s_wa" inputmode="tel" value="'+esc(s.whatsapp)+'"></label>'+
+   '<label class="full">Advertiser name (empty shows Your shop here)<input id="s_adt" value="'+esc(s.adTitle)+'"></label><label class="full">Advertiser message<input id="s_adm" value="'+esc(s.adText)+'"></label><label class="full">Advertiser WhatsApp<input id="s_adp" inputmode="tel" value="'+esc(s.adPhone)+'"></label>'+
+   '<div class="full"><button class="btn" id="saveSet" type="button">Save settings</button></div></div></div>';
+}
+function resize(file){return new Promise(function(res,rej){var r=new FileReader();r.onerror=rej;r.onload=function(){var im=new Image();im.onerror=rej;im.onload=function(){var m=480,s=Math.min(1,m/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);var q=.72,u=c.toDataURL('image/jpeg',q);while(u.length>140000&&q>.3){q-=.1;u=c.toDataURL('image/jpeg',q)}res(u)};im.src=r.result};r.readAsDataURL(file)})}
+function authErr(e){var c=e&&e.code||'';if(c.indexOf('invalid-email')>-1)return 'That email does not look right.';if(c.indexOf('weak-password')>-1)return 'Use a password with at least 6 characters.';if(c.indexOf('email-already')>-1)return 'This email already has an account. Tap Sign in.';if(c.indexOf('invalid-credential')>-1||c.indexOf('wrong-password')>-1||c.indexOf('user-not-found')>-1)return 'Wrong email or password.';if(c.indexOf('network')>-1)return 'No connection. Check your data and try again.';return 'Something went wrong. Try again.'}
+function setErr(m){S.err=m;var e=document.getElementById('err');if(e)e.textContent=m}
 
-app.addEventListener('input',function(e){if(e.target.id==='q'){q=e.target.value;renderGrid()}});
-app.addEventListener('change',function(e){
-  if(e.target.id==='f_photo'){var f=e.target.files&&e.target.files[0];if(!f)return;resize(f).then(function(d){formPhoto=d;toast('Photo ready')}).catch(function(){toast('Could not read that photo. Try another one.')})}
-});
-app.addEventListener('click',function(e){
+app.addEventListener('input',function(e){if(e.target.id==='q'){S.q=e.target.value;renderGrid()}});
+app.addEventListener('change',function(e){if(e.target.id==='j_photo'){var f=e.target.files&&e.target.files[0];if(!f)return;resize(f).then(function(d){S.photo=d;toast('Photo ready')}).catch(function(){toast('Could not read that photo.')})}});
+app.addEventListener('click',async function(e){
   var t=e.target.closest('button,a');if(!t)return;
-  if(t.id==='goSell'){document.getElementById('sell').scrollIntoView({behavior:'smooth'});return}
-  if(t.dataset.cat){cat=t.dataset.cat;renderChips();renderGrid();return}
-  if(t.id==='mng'){manage=!manage;pendingDelete=null;renderOwner();return}
-  if(t.id==='pub'){publish();return}
-  if(t.id==='saveSet'){state.settings.ownerWhatsApp=document.getElementById('s_phone').value.trim();state.settings.fees=document.getElementById('s_fees').value.trim();state.settings.adTitle=document.getElementById('s_adt').value.trim();state.settings.adText=document.getElementById('s_adm').value.trim();state.settings.adPhone=document.getElementById('s_adp').value.trim();renderSell();renderAd();markDirty();toast('Saved. Publish to make it live.');return}
-  if(t.id==='addBtn'){
-    var title=document.getElementById('f_title').value.trim();
-    if(!title){toast('Enter the item name first.');return}
-    var p=parseInt(String(document.getElementById('f_price').value).replace(/\D/g,''),10)||0;
-    state.listings.unshift({id:'l'+Date.now().toString(36),title:title,price:p,cat:document.getElementById('f_cat').value,area:document.getElementById('f_area').value.trim()||'Jalingo',seller:document.getElementById('f_seller').value.trim()||'Seller',phone:document.getElementById('f_phone').value.trim(),desc:document.getElementById('f_desc').value.trim(),photo:formPhoto,featured:document.getElementById('f_feat').checked,sold:false,sample:false});
-    formPhoto='';renderGrid();renderOwner();markDirty();toast('Added. Publish to make it live.');return}
+  if(t.dataset.go){go(t.dataset.go);return}
+  if(t.dataset.cat){S.cat=t.dataset.cat;renderChips();renderGrid();return}
+  if(t.dataset.tab){S.tab=t.dataset.tab;S.err='';render();return}
+  if(t.id==='out'){await signOut(auth);go('home');return}
+  if(t.id==='authGo'){
+    var em=document.getElementById('a_email').value.trim(),pw=document.getElementById('a_pass').value;
+    if(!em||!pw){setErr('Enter your email and password.');return}
+    t.disabled=true;try{if(S.tab==='up')await createUserWithEmailAndPassword(auth,em,pw);else await signInWithEmailAndPassword(auth,em,pw)}catch(x){setErr(authErr(x));t.disabled=false}return}
+  if(t.id==='joinGo'){
+    var g=function(i){return document.getElementById(i).value.trim()};
+    var title=g('j_title'),name=g('j_name'),phone=g('j_phone');
+    if(!title||!name||!phone){setErr('Fill in what you do, your name and your WhatsApp number.');return}
+    if(!document.getElementById('j_agree').checked){setErr('Please tick the box to agree to the commission.');return}
+    var d=S.mine||{},price=parseInt(g('j_price').replace(/\D/g,''),10)||0;
+    var data={ownerUid:S.user.uid,ownerEmail:S.user.email,title:title,name:name,phone:phone,price:price,cat:document.getElementById('j_cat').value,area:g('j_area')||'Jalingo',desc:g('j_desc'),photo:S.photo||d.photo||'',agreed:true,commission:Number(S.settings.commission)||7,featured:!!d.featured,status:d.id?(d.status==='approved'?'pending':d.status):'pending'};
+    if(!d.id)data.createdAt=serverTimestamp();
+    t.disabled=true;try{await setDoc(doc(db,'services',S.user.uid),data,{merge:true});toast(d.id?'Saved.':'Sent. We will approve it soon.');S.photo='';go('join')}catch(x){setErr('Could not save. Check your connection and try again.');t.disabled=false}return}
+  if(t.id==='delMine'){if(t.dataset.sure!=='1'){t.dataset.sure='1';t.textContent='Tap again to delete';return}try{await deleteDoc(doc(db,'services',S.user.uid));toast('Deleted.');go('home')}catch(x){setErr('Could not delete.')}return}
   if(t.dataset.act){
-    var id=t.dataset.id,i=state.listings.findIndex(function(l){return l.id===id});if(i<0)return;
-    if(t.dataset.act==='feat')state.listings[i].featured=!state.listings[i].featured;
-    if(t.dataset.act==='sold')state.listings[i].sold=!state.listings[i].sold;
-    if(t.dataset.act==='del'){if(pendingDelete!==id){pendingDelete=id;renderOwner();return}state.listings.splice(i,1);pendingDelete=null}
-    renderGrid();renderOwner();markDirty()}
+    var id=t.dataset.id,x=S.all.find(function(y){return y.id===id});if(!x)return;var patch={};
+    if(t.dataset.act==='approve')patch.status='approved';if(t.dataset.act==='remove')patch.status='removed';if(t.dataset.act==='feat')patch.featured=!x.featured;
+    try{await updateDoc(doc(db,'services',id),patch)}catch(y){toast('Could not update.')}return}
+  if(t.id==='saveSet'){
+    var v=function(i){return document.getElementById(i).value.trim()};
+    try{await setDoc(doc(db,'settings','main'),{commission:Math.min(30,Math.max(0,parseInt(v('s_comm'),10)||7)),whatsapp:v('s_wa'),adTitle:v('s_adt'),adText:v('s_adm'),adPhone:v('s_adp')},{merge:true});toast('Saved.')}catch(y){toast('Could not save.')}return}
 });
-shell();
-fetch('listings.json',{cache:'no-cache'}).then(function(r){return r.json()}).then(function(d){state=d;state.settings=state.settings||{};renderGrid();renderSell();renderAd()}).catch(function(){document.getElementById('count').textContent='Could not load listings. Check your connection and refresh.'});
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(function(){})}
-})();
+render();
 </script>
 </body></html>
