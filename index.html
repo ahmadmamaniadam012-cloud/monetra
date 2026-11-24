@@ -124,14 +124,31 @@ footer{margin-top:22px;color:var(--muted);font-size:.8rem;display:flex;justify-c
 .b.me{align-self:flex-end;background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
 .sendrow{display:flex;gap:8px;margin-top:10px}
 .sendrow input{flex:1;min-width:0;padding:11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+
+.wrap{padding-bottom:96px}
+.navbar{position:fixed;left:0;right:0;bottom:0;z-index:15;display:flex;background:var(--surface);border-top:1px solid var(--line);padding:4px max(6px,env(safe-area-inset-left,0px)) calc(4px + env(safe-area-inset-bottom,0px)) max(6px,env(safe-area-inset-left,0px))}
+.nav{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:0;color:var(--muted);font:600 .7rem var(--font-body);padding:8px 2px;cursor:pointer;border-radius:10px}
+.nav.on{color:var(--brand)}
+.nav .nl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toast{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+#splash{position:fixed;inset:0;z-index:100;background:var(--brand);color:var(--brand-ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:24px;animation:splashOut .5s ease 2.3s forwards}
+#splash .sl{width:84px;height:84px;border-radius:24px;background:var(--pop);color:var(--pop-ink);display:flex;align-items:center;justify-content:center;font:700 3rem var(--font-display);animation:logoPop .8s cubic-bezier(.2,.9,.3,1.2) both}
+#splash .sn{font:700 2rem var(--font-display);letter-spacing:-.02em;animation:fadeUp .6s ease .5s both}
+#splash .st{opacity:.85;animation:fadeUp .6s ease .8s both}
+@keyframes logoPop{0%{transform:scale(.3) rotate(-25deg);opacity:0}60%{transform:scale(1.12) rotate(-6deg);opacity:1}100%{transform:scale(1) rotate(-6deg);opacity:1}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes splashOut{to{opacity:0;visibility:hidden;pointer-events:none}}
+@media (prefers-reduced-motion:reduce){#splash{display:none}}
 </style></head><body>
+<div id="splash" aria-hidden="true"><div class="sl">M</div><div class="sn">Monetra</div><div class="st">Find any service in Jalingo</div></div>
 <div id="app"></div>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,updateProfile} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,updateProfile,sendPasswordResetEmail} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,query,where,onSnapshot,serverTimestamp,addDoc,orderBy} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {CONFIG} from "./config.js";
 
+(function(){var sp=document.getElementById('splash');if(!sp)return;try{if(sessionStorage.getItem('splash')==='1'){sp.remove();return}sessionStorage.setItem('splash','1')}catch(e){}})();
 var CATS=['Phones & Gadgets','Fashion & Tailoring','Food','Home & Repairs','Beauty','Tutoring','Transport & Delivery','Other'];
 var AREAS=['Sabon Gari','Barade','Magami','Mayo Gwoi'];
 var app=document.getElementById('app');
@@ -156,25 +173,32 @@ if(configured){
     S.user=u;if(unsubChats){unsubChats();unsubChats=null}S.chats=[];if(unsubAll){unsubAll();unsubAll=null}if(unsubMine){unsubMine();unsubMine=null}S.all=[];S.mine=null;
     if(u&&isAdmin()){unsubAll=onSnapshot(collection(db,'services'),function(s){S.all=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});if(S.view==='admin')render()},function(){})}
     else if(u){unsubMine=onSnapshot(doc(db,'services',u.uid),function(s){S.mine=s.exists()?Object.assign({id:s.id},s.data()):null;if(S.view==='join')render()},function(){})}
-    if(u){unsubChats=onSnapshot(query(collection(db,'chats'),where('participants','array-contains',u.uid)),function(s){S.chats=s.docs.map(function(d){return Object.assign({id:d.id},d.data({serverTimestamps:'estimate'}))});S.chats.sort(function(a,b){return ms(b.updatedAt)-ms(a.updatedAt)});if(S.view==='inbox')render();var bt=document.querySelector('[data-go="inbox"]');if(bt){var n=unreadCount();bt.textContent='Messages'+(n?' ('+n+')':'')}},function(){})}
+    if(u){unsubChats=onSnapshot(query(collection(db,'chats'),where('participants','array-contains',u.uid)),function(s){S.chats=s.docs.map(function(d){return Object.assign({id:d.id},d.data({serverTimestamps:'estimate'}))});S.chats.sort(function(a,b){return ms(b.updatedAt)-ms(a.updatedAt)});if(S.view==='inbox')render();var bt=document.querySelector('.nav[data-go="inbox"] .nl');if(bt){var n=unreadCount();bt.textContent='Chats'+(n?' '+n:'')}},function(){})}
     if(!u&&(S.view==='inbox'||S.view==='chat'))S.view='home';
     if(S.view==='auth'&&u)S.view='home';render();
   });
 }
 function go(v){if(v!=='chat'&&unsubMsgs){unsubMsgs();unsubMsgs=null}S.view=v;S.err='';S.photo='';render();window.scrollTo(0,0)}
 
-function header(){
-  var a=[];
-  if(S.user){var nu=unreadCount();a.push('<button class="btn ghost small" data-go="inbox">Messages'+(nu?' ('+nu+')':'')+'</button>');a.push('<button class="btn ghost small" data-go="join">'+(isAdmin()?'':'My service')+'</button>');if(isAdmin())a.push('<button class="btn small" data-go="admin">Admin</button>');a.push('<button class="btn ghost small" id="out">Sign out</button>')}
-  else a.push('<button class="btn small" data-go="auth">Sign in</button>');
-  return '<div class="topbar"><div class="brandrow">Monetra</div><div class="acts">'+a.filter(function(x){return x.indexOf('></button>')<0}).join('')+'</div></div>';
+function header(){return '<div class="topbar"><div class="brandrow">Monetra</div></div>'}
+var IC={home:'<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',chat:'<path d="M4 5h16v11H9l-5 4z"/>',svc:'<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2"/>',admin:'<path d="M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/>',user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>'};
+function ni(k){return '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+IC[k]+'</svg>'}
+function navbar(){
+  var v=S.view,n=unreadCount(),items=[];
+  function b(attr,k,label,on){return '<button class="nav'+(on?' on':'')+'" type="button" '+attr+'>'+ni(k)+'<span class="nl">'+label+'</span></button>'}
+  items.push(b('data-go="home"','home','Home',v==='home'));
+  items.push(b('data-go="inbox"','chat','Chats'+(n?' '+n:''),v==='inbox'||v==='chat'));
+  if(isAdmin())items.push(b('data-go="admin"','admin','Admin',v==='admin'));
+  if(S.user)items.push(b('data-go="join"','svc','My service',v==='join'));
+  items.push(S.user?b('id="out"','user','Sign out',false):b('data-go="auth"','user','Sign in',v==='auth'));
+  return '<nav class="navbar" aria-label="Main">'+items.join('')+'</nav>';
 }
 function render(){
   if(!configured){app.innerHTML='<div class="wrap"><div class="panel"><h2>Almost ready</h2><p>This app needs its database connected. Open <b>config.js</b> on GitHub and paste your Firebase details.</p></div></div>';return}
   if((S.view==='join'||S.view==='inbox'||S.view==='chat')&&!S.user)S.view='auth';
   var v=S.view,h='<div class="wrap">'+header();
   if(v==='home')h+=homeView();else if(v==='auth')h+=authView();else if(v==='join')h+=joinView();else if(v==='inbox')h+=inboxView();else if(v==='chat')h+=chatView();else if(v==='admin'&&isAdmin())h+=adminView();else h+=homeView();
-  app.innerHTML=h+'</div>';
+  app.innerHTML=h+'</div>'+navbar();
   if(v==='home'||S.view==='home'){renderChips();renderGrid();renderAd()}
   if(S.view==='chat')renderMsgs();
 }
@@ -208,7 +232,7 @@ function authView(){
   var up=S.tab==='up';
   return '<div class="panel"><div class="tabs"><button class="chip" data-tab="in" aria-pressed="'+!up+'">Sign in</button><button class="chip" data-tab="up" aria-pressed="'+up+'">Create account</button></div>'+
    '<div class="form">'+(up?'<label class="full">Your name<input id="a_name" maxlength="40" autocomplete="name"></label>':'')+'<label class="full">Email<input id="a_email" type="email" autocomplete="email" inputmode="email"></label><label class="full">Password (6 or more characters)<input id="a_pass" type="password" autocomplete="'+(up?'new-password':'current-password')+'"></label>'+
-   '<div class="full err" id="err" role="alert">'+esc(S.err)+'</div><div class="full"><button class="btn" id="authGo" type="button">'+(up?'Create account':'Sign in')+'</button> <button class="btn ghost" data-go="home" type="button">Back</button></div></div></div>';
+   '<div class="full err" id="err" role="alert">'+esc(S.err)+'</div><div class="full"><button class="btn" id="authGo" type="button">'+(up?'Create account':'Sign in')+'</button> <button class="btn ghost" data-go="home" type="button">Back</button>'+(up?'':' <button class="btn ghost" id="forgot" type="button">Forgot password?</button>')+'</div></div></div>';
 }
 function joinView(){
   var d=S.mine||{},st=d.status,c=S.settings.commission;
@@ -279,7 +303,7 @@ async function sendMsg(){
 }
 function resize(file){return new Promise(function(res,rej){var r=new FileReader();r.onerror=rej;r.onload=function(){var im=new Image();im.onerror=rej;im.onload=function(){var m=480,s=Math.min(1,m/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);var q=.72,u=c.toDataURL('image/jpeg',q);while(u.length>140000&&q>.3){q-=.1;u=c.toDataURL('image/jpeg',q)}res(u)};im.src=r.result};r.readAsDataURL(file)})}
 function authErr(e){var c=e&&e.code||'';if(c.indexOf('invalid-email')>-1)return 'That email does not look right.';if(c.indexOf('weak-password')>-1)return 'Use a password with at least 6 characters.';if(c.indexOf('email-already')>-1)return 'This email already has an account. Tap Sign in.';if(c.indexOf('invalid-credential')>-1||c.indexOf('wrong-password')>-1||c.indexOf('user-not-found')>-1)return 'Wrong email or password.';if(c.indexOf('network')>-1)return 'No connection. Check your data and try again.';return 'Something went wrong. Try again.'}
-function setErr(m){S.err=m;var e=document.getElementById('err');if(e)e.textContent=m}
+function setErr(m){S.err=m;var e=document.getElementById('err');if(e){e.style.color='';e.textContent=m}}
 
 app.addEventListener('keydown',function(e){if(e.target.id==='m_in'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}});
 app.addEventListener('input',function(e){if(e.target.id==='q'){S.q=e.target.value;renderGrid()}});
@@ -293,6 +317,12 @@ app.addEventListener('click',async function(e){
   if(t.dataset.cat){S.cat=t.dataset.cat;renderChips();renderGrid();return}
   if(t.dataset.tab){S.tab=t.dataset.tab;S.err='';render();return}
   if(t.id==='out'){await signOut(auth);go('home');return}
+  if(t.id==='forgot'){
+    var em2=(document.getElementById('a_email').value||'').trim();
+    if(!em2){setErr('Type your email above first, then tap Forgot password.');return}
+    try{await sendPasswordResetEmail(auth,em2);var e1=document.getElementById('err');if(e1){e1.style.color='var(--brand)';e1.textContent='If this email has an account, we sent a reset link to '+em2+'. Check your inbox and your spam folder.'}}
+    catch(x){setErr(x&&x.code&&x.code.indexOf('invalid-email')>-1?'That email does not look right.':'Could not send. Check your email and your connection.')}
+    return}
   if(t.id==='authGo'){
     var em=document.getElementById('a_email').value.trim(),pw=document.getElementById('a_pass').value;
     if(!em||!pw){setErr('Enter your email and password.');return}
