@@ -206,6 +206,19 @@ footer{margin-top:22px;color:var(--muted);font-size:.8rem;display:flex;justify-c
 .dots i{width:8px;height:8px;border-radius:4px;background:var(--line);transition:width .2s}
 .dots i.on{background:var(--brand);width:22px}
 #onb .actions{width:100%;max-width:320px}
+
+select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px!important;cursor:pointer}
+#sheet{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;justify-content:flex-end}
+#sheet .sh-bg{position:absolute;inset:0;background:rgba(6,24,14,.55);backdrop-filter:blur(3px);animation:fadeIn .2s ease both}
+#sheet .sh{position:relative;background:var(--surface);color:var(--ink);border-radius:24px 24px 0 0;padding:10px 14px calc(18px + env(safe-area-inset-bottom,0px));max-height:75vh;overflow-y:auto;box-shadow:0 -10px 40px rgba(0,0,0,.25);animation:sheetUp .28s cubic-bezier(.2,.9,.3,1) both;max-width:560px;width:100%;margin:0 auto}
+@keyframes sheetUp{from{transform:translateY(100%)}to{transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.sh-grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 10px}
+.sh-t{font:700 1.1rem var(--font-display);padding:4px 8px 10px}
+.sh-o{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;background:transparent;border:0;border-radius:14px;padding:15px 14px;margin-top:4px;font:500 1rem var(--font-body);color:var(--ink);cursor:pointer}
+.sh-o:active{background:var(--t1)}
+.sh-o.on{background:var(--brand);color:var(--brand-ink);font-weight:600}
+@media (prefers-reduced-motion:reduce){#sheet .sh,#sheet .sh-bg{animation:none}}
 </style></head><body>
 <div id="splash" aria-hidden="true"><div class="sl">M</div><div class="sn">Monetra</div><div class="st">Find any service in Jalingo</div></div>
 <div id="app"></div>
@@ -305,6 +318,7 @@ if(configured){
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();S.installEvt=e;if(S.view==='account')render()});
 
 function go(v){
+  closeSheet();
   if(v!=='chat'&&unsubMsgs){unsubMsgs();unsubMsgs=null}
   S.view=v;S.err='';S.photo='';S.anim=true;S.gridAnim=(v==='home'||v==='saved');S.editName=false;render();window.scrollTo(0,0);
 }
@@ -626,6 +640,25 @@ function renderAdminLists(){
 
 /* ---------- photo ---------- */
 function resize(file){return new Promise(function(res,rej){var r=new FileReader();r.onerror=rej;r.onload=function(){var im=new Image();im.onerror=rej;im.onload=function(){var m=520,s=Math.min(1,m/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);var q=.72,u=c.toDataURL('image/jpeg',q);while(u.length>140000&&q>.3){q-=.1;u=c.toDataURL('image/jpeg',q)}res(u)};im.src=r.result};r.readAsDataURL(file)})}
+
+/* ---------- custom picker sheet (replaces the plain white native dropdown) ---------- */
+function closeSheet(){var s=document.getElementById('sheet');if(s)s.remove()}
+function openSheet(sel){
+  closeSheet();
+  var lb=sel.closest('label'),title=sel.getAttribute('aria-label')||(lb&&lb.firstChild&&lb.firstChild.textContent.trim())||'Choose';
+  var opts=[].slice.call(sel.options),ov=document.createElement('div');ov.id='sheet';
+  ov.innerHTML='<div class="sh-bg"></div><div class="sh" role="listbox" aria-label="'+esc(title)+'"><div class="sh-grab"></div><div class="sh-t">'+esc(title)+'</div>'+opts.map(function(o,i){return '<button type="button" class="sh-o'+(o.selected?' on':'')+'" role="option" aria-selected="'+o.selected+'" data-i="'+i+'"><span>'+esc(o.text)+'</span>'+(o.selected?svg('<path d="M5 12l5 5 9-10"/>',20):'')+'</button>'}).join('')+'</div>';
+  ov.addEventListener('click',function(e){
+    if(e.target.classList.contains('sh-bg')){closeSheet();return}
+    var b=e.target.closest('.sh-o');if(!b)return;
+    sel.selectedIndex=Number(b.dataset.i);sel.dispatchEvent(new Event('change',{bubbles:true}));closeSheet();
+  });
+  document.body.appendChild(ov);
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeSheet()});
+app.addEventListener('mousedown',function(e){if(e.target.tagName==='SELECT')e.preventDefault()});
+app.addEventListener('click',function(e){if(e.target.tagName==='SELECT'){e.preventDefault();openSheet(e.target)}});
+app.addEventListener('keydown',function(e){if(e.target.tagName==='SELECT'&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openSheet(e.target)}});
 
 /* ---------- events ---------- */
 app.addEventListener('keydown',function(e){
