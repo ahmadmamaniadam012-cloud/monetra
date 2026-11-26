@@ -224,7 +224,7 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
 <div id="app"></div>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,updateProfile,sendPasswordResetEmail} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,updateProfile,sendPasswordResetEmail,reauthenticateWithCredential,EmailAuthProvider,updatePassword} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {getFirestore,collection,collectionGroup,doc,setDoc,updateDoc,deleteDoc,query,where,onSnapshot,serverTimestamp,addDoc,orderBy,increment,arrayUnion,arrayRemove} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {CONFIG} from "./config.js";
 
@@ -332,14 +332,14 @@ function navbar(){
   items.push(b('data-go="saved"','saved','Saved',v==='saved'));
   items.push(b('data-go="inbox"','chat','Chats'+(n?' '+n:''),v==='inbox'||v==='chat'));
   if(isAdmin())items.push(b('data-go="admin"','admin','Admin',v==='admin'));
-  items.push(b('data-go="account"','user','Account',v==='account'||v==='join'||v==='about'||v==='auth'));
+  items.push(b('data-go="account"','user','Account',v==='account'||v==='join'||v==='about'||v==='auth'||v==='pass'));
   return '<nav class="navbar" aria-label="Main">'+items.join('')+'</nav>';
 }
 
 /* ---------- render ---------- */
 function render(){
   if(!configured){app.innerHTML='<div class="wrap"><div class="panel"><h2>Almost ready</h2><p>This app needs its database connected. Open <b>config.js</b> on GitHub and paste your Firebase details.</p></div></div>';return}
-  if((S.view==='join'||S.view==='inbox'||S.view==='chat'||S.view==='saved')&&!S.user)S.view='auth';
+  if((S.view==='join'||S.view==='inbox'||S.view==='chat'||S.view==='saved'||S.view==='pass')&&!S.user)S.view='auth';
   if(S.view==='admin'&&!isAdmin())S.view='home';
   if(S.view==='service'&&!S.svcId)S.view='home';
   var v=S.view,h='<div class="wrap'+(S.anim?' enter':'')+'">';S.anim=false;
@@ -352,6 +352,7 @@ function render(){
   else if(v==='saved')h+=savedView();
   else if(v==='account')h+=accountView();
   else if(v==='about')h+=aboutView();
+  else if(v==='pass')h+=passView();
   else if(v==='admin')h+=adminView();
   else h+=homeView();
   app.innerHTML=h+'</div>'+navbar();
@@ -539,9 +540,34 @@ function accountView(){
    li('svc',me?'My service':'Offer your service',me?('Status: '+(st==='approved'?'Live':st==='pending'?'Waiting for approval':'Removed')):'Free to join','data-go="join"')+
    li('saved','Saved services',S.favs.length+' saved','data-go="saved"')+
    li('edit','Edit my name','','id="editName"')+
-   li('lock','Change password','We email you a reset link','id="chgPass"')+
+   li('lock','Change password','Use your current password','data-go="pass"')+
    common+
    li('out','Sign out','','id="out"');
+}
+
+function passView(){
+  return '<div class="back"><button class="btn ghost small" data-go="account" type="button">'+svg(IC.back,16)+'Account</button></div><div class="panel"><h2>Change password</h2><p class="note">For your safety, type your current password first. Use a new password nobody can guess, and do not share it.</p>'+
+   '<div class="form"><label class="full">Current password<input id="p_old" type="password" autocomplete="current-password"></label><label class="full">New password (6 or more characters)<input id="p_new" type="password" autocomplete="new-password"></label><label class="full">Type the new password again<input id="p_new2" type="password" autocomplete="new-password"></label>'+
+   '<label class="full check" style="flex-direction:row;gap:8px;font-size:.9rem"><input id="p_show" type="checkbox" style="width:auto"> <span>Show passwords</span></label>'+
+   '<div class="full err" id="err" role="alert"></div><div class="full"><button class="btn" id="passGo" type="button">Save new password</button> <button class="btn ghost" id="passForgot" type="button">I forgot my current password</button></div></div></div>';
+}
+async function changePass(btn){
+  var o=document.getElementById('p_old').value,n=document.getElementById('p_new').value,n2=document.getElementById('p_new2').value;
+  if(!o||!n||!n2){setErr('Fill in all three boxes.');return}
+  if(n.length<6){setErr('The new password needs at least 6 characters.');return}
+  if(n===o){setErr('The new password must be different from the current one.');return}
+  if(n!==n2){setErr('The two new passwords do not match.');return}
+  btn.disabled=true;
+  try{
+    var cred=EmailAuthProvider.credential(S.user.email,o);
+    await reauthenticateWithCredential(auth.currentUser,cred);
+    await updatePassword(auth.currentUser,n);
+    toast('Password changed.');go('account');
+  }catch(e){
+    var c=(e&&e.code)||'';
+    setErr(c.indexOf('wrong-password')>-1||c.indexOf('invalid-credential')>-1?'Your current password is wrong.':c.indexOf('too-many')>-1?'Too many tries. Wait a few minutes and try again.':c.indexOf('weak')>-1?'Choose a stronger password.':c.indexOf('network')>-1?'No connection. Check your data.':'Could not change it. Try again.');
+    btn.disabled=false;
+  }
 }
 
 /* ---------- offer / edit service ---------- */
@@ -667,6 +693,7 @@ app.addEventListener('keydown',function(e){
 });
 app.addEventListener('input',function(e){if(e.target.id==='q'){S.q=e.target.value;renderGrid()}});
 app.addEventListener('change',function(e){
+  if(e.target.id==='p_show'){['p_old','p_new','p_new2'].forEach(function(i){var f=document.getElementById(i);if(f)f.type=e.target.checked?'text':'password'})}
   if(e.target.id==='f_area'){S.area=e.target.value;renderGrid()}
   if(e.target.id==='f_sort'){S.sort=e.target.value;renderGrid()}
   if(e.target.id==='j_photo'){var f=e.target.files&&e.target.files[0];if(!f)return;resize(f).then(function(d){S.photo=d;var p=document.getElementById('j_prev');if(p)p.innerHTML='<img src="'+d+'" alt="Your photo">';toast('Photo ready')}).catch(function(){toast('Could not read that photo.')})}
@@ -709,7 +736,8 @@ app.addEventListener('click',async function(e){
   if(id==='editName'){S.editName=true;render();return}
   if(id==='cancelName'){S.editName=false;render();return}
   if(id==='saveName'){var nn=(document.getElementById('n_name').value||'').trim();if(!nn){toast('Type your name.');return}try{await updateProfile(auth.currentUser,{displayName:nn});S.user=auth.currentUser;S.editName=false;render();toast('Name saved.')}catch(x){toast('Could not save your name.')}return}
-  if(id==='chgPass'){try{await sendPasswordResetEmail(auth,S.user.email);toast('Reset link sent to '+S.user.email+'. Check your inbox and spam.')}catch(x){toast('Could not send. Try again.')}return}
+  if(id==='passGo'){changePass(t);return}
+  if(id==='passForgot'){try{await sendPasswordResetEmail(auth,S.user.email);setErr('');var e2=document.getElementById('err');if(e2){e2.style.color='var(--brand)';e2.textContent='We sent a reset link to '+S.user.email+'. Check your inbox and spam.'}}catch(x){setErr('Could not send. Try again.')}return}
   if(id==='rpToggle'){openReport();return}
   if(id==='rpSend'){sendReport();return}
   if(id==='rvSend'){sendReview();return}
